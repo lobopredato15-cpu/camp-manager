@@ -1,4 +1,4 @@
-﻿create extension if not exists pgcrypto;
+﻿create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists public.organizations (
   id uuid primary key default gen_random_uuid(),
@@ -33,7 +33,7 @@ returns table (
 )
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   return query
@@ -41,7 +41,7 @@ begin
   from public.app_users u
   where lower(u.username) = lower(trim(p_username))
     and u.active = true
-    and u.password_hash = crypt(p_password, u.password_hash)
+    and u.password_hash = extensions.crypt(p_password, u.password_hash)
   limit 1;
 end;
 $$;
@@ -54,7 +54,7 @@ values ('Default Organization')
 on conflict (name) do nothing;
 
 insert into public.app_users (organization_id, username, password_hash, role, active)
-select id, 'admin', crypt('admin', gen_salt('bf')), 'organization_admin', true
+select id, 'admin', extensions.crypt('admin', extensions.gen_salt('bf')), 'organization_admin', true
 from public.organizations
 where name = 'Default Organization'
 on conflict (username) do update
@@ -62,3 +62,4 @@ set password_hash = excluded.password_hash,
     role = excluded.role,
     active = true,
     updated_at = now();
+
