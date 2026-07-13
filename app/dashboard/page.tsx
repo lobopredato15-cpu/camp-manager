@@ -94,6 +94,29 @@ export default function DashboardPage() {
   const usedBeds = activeAssignments.length;
   const occupancy = totalBeds ? Math.round((usedBeds / totalBeds) * 100) : 0;
   const availableRooms = data.rooms.filter((room) => room.status === "available");
+  const dirtyRooms = data.rooms.filter((room) => room.status === "maintenance" || data.assignments.some((assignment) => assignment.room_id === room.id && assignment.status === "checked-in"));
+  const stayReportRows = data.rooms.map((room) => {
+    const camp = data.camps.find((item) => item.id === room.camp_id);
+    const assignment = data.assignments.find((item) => item.room_id === room.id && item.status !== "cancelled" && item.status !== "checked-out");
+    const person = assignment ? data.people.find((item) => item.id === assignment.person_id) : null;
+    const stayDays = assignment
+      ? Math.max(1, Math.ceil((new Date(assignment.end_date).getTime() - new Date(assignment.start_date).getTime()) / 86400000))
+      : 0;
+    const roomState = room.status === "maintenance" ? "Mantenimiento" : assignment ? "Ocupada" : "Libre";
+    const cleaningState = room.status === "maintenance" ? "Sucia" : assignment?.status === "checked-in" ? "Sucia" : "Limpia";
+    return {
+      id: room.id,
+      camp: camp?.name || "Sin campamento",
+      room: room.name,
+      person: person?.name || "-",
+      company: person?.company || "-",
+      startDate: assignment?.start_date || "-",
+      endDate: assignment?.end_date || "-",
+      stayDays,
+      roomState,
+      cleaningState,
+    };
+  });
 
   const filteredPeople = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -143,20 +166,31 @@ export default function DashboardPage() {
     await loadData();
   }
 
-  function exportReport() {
-    const safeCell = (value: string) => {
-      const escaped = /^[=+\-@]/.test(value) ? `'${value}` : value;
-      return `"${escaped.replaceAll('"', '""')}"`;
-    };
-    const rows = [["Name", "Company", "Trade", "Flight"], ...data.people.map((person) => [person.name, person.company, person.trade, person.flight])];
-    const csv = rows.map((row) => row.map(safeCell).join(",")).join("\n");
+  function safeCsvCell(value: string) {
+    const escaped = /^[=+\-@]/.test(value) ? `'${value}` : value;
+    return `"${escaped.replaceAll('"', '""')}"`;
+  }
+
+  function downloadCsv(filename: string, rows: string[][]) {
+    const csv = rows.map((row) => row.map(safeCsvCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "camp-people-report.csv";
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportPeopleReport() {
+    downloadCsv("camp-people-report.csv", [["Name", "Company", "Trade", "Flight"], ...data.people.map((person) => [person.name, person.company, person.trade, person.flight])]);
+  }
+
+  function exportStayReport() {
+    downloadCsv("camp-stay-room-report.csv", [
+      ["Camp", "Room", "Person", "Company", "Start", "End", "Stay days", "Room status", "Cleaning status"],
+      ...stayReportRows.map((row) => [row.camp, row.room, row.person, row.company, row.startDate, row.endDate, String(row.stayDays), row.roomState, row.cleaningState]),
+    ]);
   }
 
   return (
@@ -167,7 +201,7 @@ export default function DashboardPage() {
           <a href="#dashboard"><Hotel size={18} /> Dashboard</a>
           <a href="#planning"><CalendarDays size={18} /> Planning</a>
           <a href="#people"><Users size={18} /> People</a>
-          <a href="#reports"><ClipboardList size={18} /> Reports</a>
+          <a href="#stay-report"><ClipboardList size={18} /> Reporte</a>
           <a href="#security"><ShieldCheck size={18} /> Audit</a>
           <a href="/api/logout"><LogOut size={18} /> Logout</a>
         </nav>
@@ -188,8 +222,8 @@ export default function DashboardPage() {
 
         <section className="metric-grid" aria-label="Operational summary">
           <article><Hotel /><span>Camps</span><strong>{data.camps.length}</strong></article>
-          <article><BedDouble /><span>Total beds</span><strong>{totalBeds}</strong></article>
-          <article><Users /><span>Checked in</span><strong>{checkedInCount}</strong></article>
+          <article><BedDouble /><span>Habitaciones libres</span><strong>{availableRooms.length}</strong></article>
+          <article><Users /><span>Sucias</span><strong>{dirtyRooms.length}</strong></article>
           <article><Building2 /><span>Occupancy</span><strong>{occupancy}%</strong></article>
         </section>
 
@@ -274,8 +308,40 @@ export default function DashboardPage() {
           </aside>
         </section>
 
+        <section className="panel stay-report" id="stay-report">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Reporte general</p>
+              <h3>Estadia, ocupacion y limpieza</h3>
+            </div>
+            <button className="primary" onClick={exportStayReport}><Download size={16} /> Export CSV</button>
+          </div>
+          <div className="report-table">
+            <div className="report-table-head">
+              <span>Campamento</span>
+              <span>Habitacion</span>
+              <span>Persona</span>
+              <span>Empresa</span>
+              <span>Estadia</span>
+              <span>Estado</span>
+              <span>Limpieza</span>
+            </div>
+            {stayReportRows.map((row) => (
+              <div className="report-table-row" key={row.id}>
+                <span>{row.camp}</span>
+                <strong>{row.room}</strong>
+                <span>{row.person}</span>
+                <span>{row.company}</span>
+                <span>{row.stayDays ? `${row.startDate} - ${row.endDate} (${row.stayDays} dias)` : "Sin reserva"}</span>
+                <span className={`status-chip ${row.roomState.toLowerCase()}`}>{row.roomState}</span>
+                <span className={`status-chip ${row.cleaningState.toLowerCase()}`}>{row.cleaningState}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="content-grid">
-          <article className="panel" id="reports"><div className="panel-heading"><div><p className="eyebrow">Reports</p><h3>Exports</h3></div><Download /></div><div className="report-grid"><button onClick={exportReport}><ClipboardList /> People CSV</button><button onClick={exportReport}><BedDouble /> Occupancy CSV</button><button onClick={exportReport}><Users /> Assignments CSV</button></div></article>
+          <article className="panel" id="reports"><div className="panel-heading"><div><p className="eyebrow">Reports</p><h3>Exports</h3></div><Download /></div><div className="report-grid"><button onClick={exportPeopleReport}><ClipboardList /> People CSV</button><button onClick={exportStayReport}><BedDouble /> Estadias CSV</button><button onClick={exportStayReport}><Users /> Habitaciones CSV</button></div></article>
           <article className="panel" id="security"><div className="panel-heading"><div><p className="eyebrow">Audit trail</p><h3>Recent activity</h3></div><ShieldCheck /></div><div className="audit-list">{data.auditLogs.map((event) => <div key={event.id}><time>{new Date(event.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><strong>{event.action}</strong><span>{event.detail}</span></div>)}</div></article>
         </section>
 
@@ -284,3 +350,9 @@ export default function DashboardPage() {
     </main>
   );
 }
+
+
+
+
+
+
