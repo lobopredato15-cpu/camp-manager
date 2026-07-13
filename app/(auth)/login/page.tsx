@@ -3,6 +3,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSessionToken, SESSION_COOKIE } from "@/lib/session";
 
+function supabaseConfig() {
+  return {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL,
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY,
+  };
+}
+
 async function authenticate(formData: FormData) {
   "use server";
 
@@ -13,14 +20,21 @@ async function authenticate(formData: FormData) {
     redirect("/login?error=missing");
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { url, serviceKey } = supabaseConfig();
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    redirect("/login?error=config");
+  if (!url && !serviceKey) {
+    redirect("/login?error=config_all");
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  if (!url) {
+    redirect("/login?error=config_url");
+  }
+
+  if (!serviceKey) {
+    redirect("/login?error=config_key");
+  }
+
+  const supabase = createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
@@ -60,8 +74,11 @@ type LoginPageProps = {
 
 const messages: Record<string, string> = {
   missing: "Enter username and password.",
-  invalid: "Invalid username or password.",
+  invalid: "Invalid username or password, or the Supabase login SQL has not been executed yet.",
   config: "Supabase environment variables are missing.",
+  config_all: "Supabase URL and service role key are missing in Vercel.",
+  config_url: "Supabase URL is missing in Vercel.",
+  config_key: "Supabase service role key is missing in Vercel.",
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
