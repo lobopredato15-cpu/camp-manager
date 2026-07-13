@@ -417,7 +417,7 @@ export default function DashboardPage() {
               <span>{importing ? "Importando..." : "Seleccionar archivo"}</span>
             </label>
           </div>
-          <p className="import-note">Desde Google Sheets usa Archivo > Descargar > Microsoft Excel (.xlsx) o Valores separados por comas (.csv).</p>
+          <p className="import-note">Desde Google Sheets usa Archivo, Descargar y luego Microsoft Excel (.xlsx) o Valores separados por comas (.csv).</p>
           {importStatus && <p className="import-result">{importStatus}</p>}
         </section>
         <section className="panel stay-report" id="stay-report">
@@ -462,6 +462,7 @@ export default function DashboardPage() {
     </main>
   );
 }
+
 
 
 
