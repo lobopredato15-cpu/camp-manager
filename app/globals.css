@@ -605,3 +605,51 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.login-card {
+  width: min(440px, 100%);
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.login-card h1 {
+  font-size: 2rem;
+}
+
+.login-copy,
+.login-note {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.login-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fef2f2;
+  color: var(--red);
+  font-weight: 700;
+}
+
+.login-note {
+  margin: 18px 0 0;
+  font-size: 0.88rem;
+}
