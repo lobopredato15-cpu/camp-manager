@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Download,
+  FileUp,
   Hotel,
   LogOut,
   Plus,
@@ -24,6 +25,7 @@ type Room = { id: string; camp_id: string; building: string; name: string; beds:
 type Person = { id: string; name: string; company: string; trade: string; flight: string };
 type Assignment = { id: string; person_id: string; room_id: string; start_date: string; end_date: string; status: "planned" | "checked-in" | "checked-out" | "cancelled" };
 type AuditEvent = { id: string; action: string; detail: string; created_at: string };
+type ImportRow = { name: string; company: string; startDate: string; endDate: string };
 type DashboardData = { camps: Camp[]; rooms: Room[]; people: Person[]; assignments: Assignment[]; auditLogs: AuditEvent[] };
 
 const emptyData: DashboardData = { camps: [], rooms: [], people: [], assignments: [], auditLogs: [] };
@@ -52,6 +54,8 @@ export default function DashboardPage() {
   const [query, setQuery] = useState("");
   const [selectedPerson, setSelectedPerson] = useState("");
   const [selectedRoom, setSelectedRoom] = useState("");
+  const [importStatus, setImportStatus] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const [campName, setCampName] = useState("");
   const [campLocation, setCampLocation] = useState("");
@@ -182,6 +186,89 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   }
 
+  function readCell(row: Record<string, unknown>, names: string[]) {
+    const entries = Object.entries(row);
+    for (const name of names) {
+      const match = entries.find(([key]) => key.trim().toLowerCase() === name);
+      if (match && match[1] !== undefined && match[1] !== null) return String(match[1]).trim();
+    }
+    return "";
+  }
+
+  function normalizeImportDate(value: unknown) {
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (typeof value === "number") {
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+      excelEpoch.setUTCDate(excelEpoch.getUTCDate() + value);
+      return excelEpoch.toISOString().slice(0, 10);
+    }
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const parts = raw.split(/[/-]/).map((part) => part.padStart(2, "0"));
+    if (parts.length === 3) {
+      if (parts[0].length === 4) return `${parts[0]}-${parts[1]}-${parts[2]}`;
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+  }
+
+  async function handleRosterImport(event: FormEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!selectedCamp) {
+      setImportStatus("Primero crea o selecciona un campamento.");
+      return;
+    }
+
+    setImporting(true);
+    setImportStatus("Leyendo archivo...");
+
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
+      const parsedRows: ImportRow[] = rows
+        .map((row) => ({
+          name: readCell(row, ["nombre", "name", "persona"]),
+          company: readCell(row, ["empresa", "company"]),
+          startDate: normalizeImportDate(readCell(row, ["dia de entrada", "dÃ­a de entrada", "entrada", "start", "start date"])),
+          endDate: normalizeImportDate(readCell(row, ["dia de salida", "dÃ­a de salida", "salida", "end", "end date"])),
+        }))
+        .filter((row) => row.name && row.company && row.startDate && row.endDate);
+
+      if (!parsedRows.length) {
+        setImportStatus("No encontre filas validas. Usa columnas: nombre, empresa, dia de entrada, dia de salida.");
+        return;
+      }
+
+      const roomQueue = data.rooms.filter((room) => room.camp_id === selectedCamp && room.status === "available");
+      let assigned = 0;
+      const skipped: string[] = [];
+
+      for (const row of parsedRows) {
+        const room = roomQueue.shift();
+        if (!room) {
+          skipped.push(row.name);
+          continue;
+        }
+        const person = await postJson<Person>("/api/people", { name: row.name, company: row.company, trade: "Importado", flight: "Pendiente" });
+        await postJson<Assignment>("/api/assignments", { personId: person.id, roomId: room.id, startDate: row.startDate, endDate: row.endDate });
+        assigned += 1;
+      }
+
+      setImportStatus(`${assigned} personas importadas y asignadas.${skipped.length ? ` Sin habitacion: ${skipped.join(", ")}.` : ""}`);
+      await loadData();
+    } catch (err) {
+      setImportStatus(err instanceof Error ? err.message : "No se pudo importar el archivo.");
+    } finally {
+      setImporting(false);
+    }
+  }
   function exportPeopleReport() {
     downloadCsv("camp-people-report.csv", [["Name", "Company", "Trade", "Flight"], ...data.people.map((person) => [person.name, person.company, person.trade, person.flight])]);
   }
@@ -201,6 +288,7 @@ export default function DashboardPage() {
           <a href="#dashboard"><Hotel size={18} /> Dashboard</a>
           <a href="#planning"><CalendarDays size={18} /> Planning</a>
           <a href="#people"><Users size={18} /> People</a>
+          <a href="#imports"><FileUp size={18} /> Importar</a>
           <a href="#stay-report"><ClipboardList size={18} /> Reporte</a>
           <a href="#security"><ShieldCheck size={18} /> Audit</a>
           <a href="/api/logout"><LogOut size={18} /> Logout</a>
@@ -308,6 +396,30 @@ export default function DashboardPage() {
           </aside>
         </section>
 
+        <section className="panel import-panel" id="imports">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Importacion automatica</p>
+              <h3>Subir lista desde Excel o Google Sheets</h3>
+            </div>
+            <FileUp />
+          </div>
+          <div className="import-layout">
+            <div className="import-help">
+              <strong>Columnas requeridas</strong>
+              <span>nombre</span>
+              <span>empresa</span>
+              <span>dia de entrada</span>
+              <span>dia de salida</span>
+            </div>
+            <label className="file-upload">
+              <input accept=".xlsx,.xls,.csv,.tsv" type="file" onChange={handleRosterImport} disabled={importing || !selectedCamp} />
+              <span>{importing ? "Importando..." : "Seleccionar archivo"}</span>
+            </label>
+          </div>
+          <p className="import-note">Desde Google Sheets usa Archivo > Descargar > Microsoft Excel (.xlsx) o Valores separados por comas (.csv).</p>
+          {importStatus && <p className="import-result">{importStatus}</p>}
+        </section>
         <section className="panel stay-report" id="stay-report">
           <div className="panel-heading">
             <div>
@@ -350,6 +462,7 @@ export default function DashboardPage() {
     </main>
   );
 }
+
 
 
 
